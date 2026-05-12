@@ -1,4 +1,4 @@
-name: "🌐 Open Any Site on GitHub Pages"
+name: "🌐 Open Any Site on GitHub Pages – Smart Fallback"
 
 on:
   workflow_dispatch:
@@ -7,10 +7,6 @@ on:
         description: '🔗 آدرس کامل سایت (با https)'
         required: true
         type: string
-      render_js:
-        description: '⚡ رندر جاوااسکریپت (برای سایت‌های داینامیک)'
-        type: boolean
-        default: false
       custom_proxy:
         description: '🌐 پروکسی دستی (اختیاری)'
         required: false
@@ -65,8 +61,8 @@ jobs:
         env:
           CUSTOM: ${{ github.event.inputs.custom_proxy }}
 
-      - name: ⬇️ دانلود سایت (wget mirror)
-        if: github.event.inputs.render_js != 'true'
+      - name: ⬇️ تلاش اول – wget (بدون جاوااسکریپت)
+        id: wget
         run: |
           ${{ steps.proxy.outputs.proxy_env }}
           mkdir -p _site
@@ -75,14 +71,23 @@ jobs:
                --no-parent --wait=1 --random-wait \
                --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0" \
                "$URL" 2>&1 | tee /tmp/wget.log
-          echo "✅ دانلود با wget انجام شد."
+          echo "WGET_EXIT=$?" >> $GITHUB_OUTPUT
+
+          # بررسی اینکه آیا فایل index.html داریم یا خیر
+          if [ -f index.html ]; then
+            echo "INDEX_EXISTS=true" >> $GITHUB_OUTPUT
+          else
+            echo "INDEX_EXISTS=false" >> $GITHUB_OUTPUT
+          fi
         env:
           URL: ${{ github.event.inputs.url }}
 
-      - name: 🧠 دانلود با Playwright (جاوااسکریپت سنگین)
-        if: github.event.inputs.render_js == 'true'
+      - name: 🧠 تلاش دوم – Playwright (در صورت نیاز)
+        if: steps.wget.outputs.INDEX_EXISTS != 'true'
         run: |
           ${{ steps.proxy.outputs.proxy_env }}
+          echo "⚠️ wget موفق نبود، استفاده از مرورگر Playwright"
+
           npm init -y
           npm install playwright
           npx playwright install-deps
@@ -90,7 +95,7 @@ jobs:
 
           mkdir -p _site
 
-          # نوشتن فایل render.js بدون heredoc (با استفاده از echo)
+          # نوشتن اسکریپت render.js به صورت خط‌های echo
           echo "const { chromium } = require('playwright');" > render.js
           echo "(async () => {" >> render.js
           echo "  const browser = await chromium.launch();" >> render.js
@@ -102,18 +107,16 @@ jobs:
           echo "})();" >> render.js
 
           node render.js
-          echo "✅ صفحه رندر و ذخیره شد."
+          echo "✅ صفحه با Playwright رندر و ذخیره شد."
         env:
           URL: ${{ github.event.inputs.url }}
 
-      - name: 📄 ایجاد صفحهٔ ایندکس (در صورت نیاز)
+      - name: 📄 ایجاد صفحهٔ ایندکس (در صورت لزوم)
+        if: steps.wget.outputs.INDEX_EXISTS != 'true'
         run: |
+          # اگر هنوز index.html نداریم (Playwright هم شکست خورده)، یک صفحهٔ حداقلی می‌سازیم
           if [ ! -f _site/index.html ]; then
-            echo "<html><body><h1>سایت ذخیره‌شده</h1><ul>" > _site/index.html
-            find _site -type f ! -name index.html | while read f; do
-              echo "<li><a href=\"${f#_site/}\">${f#_site/}</a></li>" >> _site/index.html
-            done
-            echo "</ul></body></html>" >> _site/index.html
+            echo "<html><body><h1>سایت در دسترس نیست</h1><p>متاسفانه نتوانستیم محتوای این سایت را دریافت کنیم.</p></body></html>" > _site/index.html
           fi
 
       - name: 🚀 انتشار روی GitHub Pages
