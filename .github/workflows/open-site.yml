@@ -1,0 +1,123 @@
+name: "🌐 Open Any Site on GitHub Pages"
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '🔗 آدرس کامل سایت (با https)'
+        required: true
+        type: string
+      render_js:
+        description: '⚡ رندر جاوااسکریپت (برای سایت‌های داینامیک)'
+        type: boolean
+        default: false
+      custom_proxy:
+        description: '🌐 پروکسی دستی (اختیاری)'
+        required: false
+        default: ''
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  mirror-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 نصب ابزارها
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wget curl ca-certificates
+
+      - name: 🛡️ تنظیم پروکسی (WARP یا دستی)
+        id: proxy
+        run: |
+          if [ -n "$CUSTOM" ]; then
+            echo "🔹 پروکسی دستی: $CUSTOM"
+            echo "proxy_env=export http_proxy=$CUSTOM https_proxy=$CUSTOM" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "🛡️ راه‌اندازی WARP..."
+          docker run -d --name warp --restart=always \
+            -p 1080:1080 --cap-add NET_ADMIN \
+            -e WARP_ENABLE_WARP=yes \
+            caomingjun/warp
+          sleep 25
+          if curl -x socks5h://127.0.0.1:1080 -s --max-time 10 https://www.google.com > /dev/null; then
+            echo "proxy_env=export http_proxy=socks5h://127.0.0.1:1080 https_proxy=socks5h://127.0.0.1:1080" >> $GITHUB_OUTPUT
+            echo "✅ WARP فعال"
+          else
+            echo "proxy_env=" >> $GITHUB_OUTPUT
+            echo "⚠️ WARP در دسترس نیست"
+          fi
+        env:
+          CUSTOM: ${{ github.event.inputs.custom_proxy }}
+
+      - name: ⬇️ دانلود سایت (wget mirror)
+        if: github.event.inputs.render_js != 'true'
+        run: |
+          ${{ steps.proxy.outputs.proxy_env }}
+          mkdir -p _site
+          cd _site
+          wget --mirror --page-requisites --adjust-extension --convert-links \
+               --no-parent --wait=1 --random-wait \
+               --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0" \
+               "$URL" 2>&1 | tee /tmp/wget.log
+          echo "✅ دانلود با wget انجام شد."
+        env:
+          URL: ${{ github.event.inputs.url }}
+
+      - name: 🧠 دانلود با Playwright (جاوااسکریپت سنگین)
+        if: github.event.inputs.render_js == 'true'
+        run: |
+          ${{ steps.proxy.outputs.proxy_env }}
+          npm init -y
+          npm install playwright
+          npx playwright install-deps
+          npx playwright install chromium
+
+          mkdir -p _site
+          cat > render.js << 'EOF'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch();
+            const page = await browser.newPage();
+            await page.goto(process.env.URL, { waitUntil: 'networkidle' });
+            const html = await page.content();
+            require('fs').writeFileSync('_site/index.html', html);
+            await browser.close();
+          })();
+          EOF
+          node render.js
+          echo "✅ صفحه رندر و ذخیره شد."
+        env:
+          URL: ${{ github.event.inputs.url }}
+
+      - name: 📄 ایجاد صفحهٔ ایندکس (در صورت نیاز)
+        run: |
+          if [ ! -f _site/index.html ]; then
+            # اگر wget فایل index.html ندارد، یک صفحه ساده با لینک به محتوای دانلود شده بساز
+            echo "<html><body><h1>سایت ذخیره‌شده</h1><ul>" > _site/index.html
+            find _site -type f ! -name index.html | while read f; do
+              echo "<li><a href=\"${f#_site/}\">${f#_site/}</a></li>" >> _site/index.html
+            done
+            echo "</ul></body></html>" >> _site/index.html
+          fi
+
+      - name: 🚀 انتشار روی GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          user_name: 'github-actions'
+          user_email: 'github-actions@users.noreply.github.com'
