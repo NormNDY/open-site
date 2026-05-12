@@ -32,6 +32,9 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: 🔧 نصب ابزارها
         run: |
@@ -105,7 +108,6 @@ jobs:
       - name: 📄 ایجاد صفحهٔ ایندکس (در صورت نیاز)
         run: |
           if [ ! -f _site/index.html ]; then
-            # اگر wget فایل index.html ندارد، یک صفحه ساده با لینک به محتوای دانلود شده بساز
             echo "<html><body><h1>سایت ذخیره‌شده</h1><ul>" > _site/index.html
             find _site -type f ! -name index.html | while read f; do
               echo "<li><a href=\"${f#_site/}\">${f#_site/}</a></li>" >> _site/index.html
@@ -121,3 +123,29 @@ jobs:
           publish_branch: gh-pages
           user_name: 'github-actions'
           user_email: 'github-actions@users.noreply.github.com'
+
+      - name: 📢 تولید لینک‌های جایگزین و ذخیره در مخزن
+        run: |
+          REPO="${{ github.repository }}"
+          BRANCH="gh-pages"
+          RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/index.html"
+
+          echo "🔗 لینک RAW (محتوا) : $RAW_URL"
+          echo "🔗 لینک HTML Preview : https://htmlpreview.github.io/?${RAW_URL}"
+          echo "🔗 لینک Statically.io : https://cdn.statically.io/gh/${REPO}/${BRANCH}/index.html"
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          cat > ACCESS_LINKS.md << 'EOF'
+## 🔗 لینک‌های دسترسی جایگزین (در صورت مسدود بودن github.io)
+
+EOF
+          echo "- [مشاهده با HTML Preview](https://htmlpreview.github.io/?${RAW_URL})" >> ACCESS_LINKS.md
+          echo "- [مشاهده با Statically](https://cdn.statically.io/gh/${REPO}/${BRANCH}/index.html)" >> ACCESS_LINKS.md
+          echo "- [فایل خام (RAW)](${RAW_URL})" >> ACCESS_LINKS.md
+
+          git add ACCESS_LINKS.md
+          git commit -m "📌 بروزرسانی لینک‌های دسترسی" || echo "بدون تغییر"
+          git pull --rebase origin main 2>/dev/null || true
+          git push origin main
