@@ -89,17 +89,18 @@ jobs:
           npx playwright install chromium
 
           mkdir -p _site
-          cat > render.js << 'EOF'
-          const { chromium } = require('playwright');
-          (async () => {
-            const browser = await chromium.launch();
-            const page = await browser.newPage();
-            await page.goto(process.env.URL, { waitUntil: 'networkidle' });
-            const html = await page.content();
-            require('fs').writeFileSync('_site/index.html', html);
-            await browser.close();
-          })();
-          EOF
+
+          # نوشتن فایل render.js بدون heredoc (با استفاده از echo)
+          echo "const { chromium } = require('playwright');" > render.js
+          echo "(async () => {" >> render.js
+          echo "  const browser = await chromium.launch();" >> render.js
+          echo "  const page = await browser.newPage();" >> render.js
+          echo "  await page.goto(process.env.URL, { waitUntil: 'networkidle' });" >> render.js
+          echo "  const html = await page.content();" >> render.js
+          echo "  require('fs').writeFileSync('_site/index.html', html);" >> render.js
+          echo "  await browser.close();" >> render.js
+          echo "})();" >> render.js
+
           node render.js
           echo "✅ صفحه رندر و ذخیره شد."
         env:
@@ -130,17 +131,11 @@ jobs:
           BRANCH="gh-pages"
           RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/index.html"
 
-          echo "🔗 لینک RAW (محتوا) : $RAW_URL"
-          echo "🔗 لینک HTML Preview : https://htmlpreview.github.io/?${RAW_URL}"
-          echo "🔗 لینک Statically.io : https://cdn.statically.io/gh/${REPO}/${BRANCH}/index.html"
-
           git config user.name "github-actions"
           git config user.email "actions@github.com"
 
-          cat > ACCESS_LINKS.md << 'EOF'
-## 🔗 لینک‌های دسترسی جایگزین (در صورت مسدود بودن github.io)
-
-EOF
+          echo "## 🔗 لینک‌های دسترسی جایگزین (در صورت مسدود بودن github.io)" > ACCESS_LINKS.md
+          echo "" >> ACCESS_LINKS.md
           echo "- [مشاهده با HTML Preview](https://htmlpreview.github.io/?${RAW_URL})" >> ACCESS_LINKS.md
           echo "- [مشاهده با Statically](https://cdn.statically.io/gh/${REPO}/${BRANCH}/index.html)" >> ACCESS_LINKS.md
           echo "- [فایل خام (RAW)](${RAW_URL})" >> ACCESS_LINKS.md
